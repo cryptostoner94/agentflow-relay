@@ -1,4 +1,13 @@
-import os, sys, uvicorn
+import os
+import sys
+import uvicorn
+
 sys.path.insert(0, os.path.dirname(__file__))
+
 if __name__ == "__main__":
-    uvicorn.run("app.main:app", host="0.0.0.0", port=int(os.environ.get("PORT","10000")), log_level="info")
+    uvicorn.run(
+        "app.main:app",
+        host="0.0.0.0",
+        port=int(os.environ.get("PORT", "10000")),
+        log_level="info"
+    )

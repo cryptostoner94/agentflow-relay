@@ -100,7 +100,28 @@ def ui(): return HTML
 @app.head("/")
 def head_root(): return {}
 
+
+@app.head("/")
+def root_head():
+    return {}
+
+@app.get("/demo/enterprise")
+def enterprise_demo():
+    return {
+        "platform":"AgentFlow Relay Platinum",
+        "focus":[
+            "workflow orchestration",
+            "AI workforce management",
+            "SDK monetization",
+            "enterprise observability",
+            "Telegram operations",
+            "Stripe monetization"
+        ],
+        "status":"demo-ready"
+    }
+
 @app.get("/health")
+
 def health(): return {"ok":True,"service":"agentflow-relay","version":"8.0.0"}
 
 @app.post("/platform/secrets")
@@ -222,3 +243,10 @@ async def telegram_update(request:Request):
 
 
 app.mount("/static", StaticFiles(directory="backend/app/static"), name="static")
+
+
+audit("platform_boot",{
+    "version":"11.1.0",
+    "runtime":"render"
+})
+
