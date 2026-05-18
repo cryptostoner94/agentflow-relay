@@ -1,4 +1,5 @@
 from fastapi import FastAPI
+from app.routers.operator import router as operator_router
 from app.routers.ui import router as ui_router
 from fastapi.middleware.cors import CORSMiddleware
 from app.routers.health import router as health_router
@@ -23,3 +24,5 @@ app.include_router(discord_router)
 app.include_router(slack_router)
 
 app.include_router(ui_router)
+
+app.include_router(operator_router)

@@ -1,10 +1,20 @@
-import httpx
+import requests
 
 class AgentFlowClient:
     def __init__(self, base_url: str):
         self.base_url = base_url.rstrip("/")
-    async def create_task(self, source_platform: str, user_ref: str, text: str):
-        async with httpx.AsyncClient() as client:
-            r = await client.post(f"{self.base_url}/tasks", json={"source_platform": source_platform, "user_ref": user_ref, "text": text})
-            r.raise_for_status()
-            return r.json()
+
+    def health(self):
+        return requests.get(f"{self.base_url}/health").json()
+
+    def create_task(self, task: str):
+        return requests.post(f"{self.base_url}/operator/task", json={"task": task}).json()
+
+    def register_agent(self, name: str, url: str):
+        return requests.post(f"{self.base_url}/operator/register-agent", json={"name": name, "url": url}).json()
+
+    def agents(self):
+        return requests.get(f"{self.base_url}/operator/agents").json()
+
+    def revenue(self):
+        return requests.get(f"{self.base_url}/operator/revenue").json()
