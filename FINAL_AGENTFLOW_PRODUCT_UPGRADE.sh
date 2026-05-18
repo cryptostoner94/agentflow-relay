@@ -1,3 +1,11 @@
+#!/bin/bash
+set -e
+
+cd ~/agentflow-relay-project
+
+mkdir -p backend/app/routers sdk/python/agentflow_relay docs
+
+cat > backend/app/routers/operator.py <<'PY'
 from datetime import datetime
 from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse
@@ -145,3 +153,72 @@ def templates():
 @router.get("/operator/logs")
 def logs():
     return {"logs": LOGS}
+PY
+
+python - <<'PY'
+from pathlib import Path
+p=Path("backend/app/main.py")
+s=p.read_text()
+if "operator_router" not in s:
+    s=s.replace("from fastapi import FastAPI","from fastapi import FastAPI\nfrom app.routers.operator import router as operator_router")
+    s += "\napp.include_router(operator_router)\n"
+p.write_text(s)
+PY
+
+cat > sdk/python/agentflow_relay/client.py <<'PY'
+import requests
+class AgentFlowClient:
+    def __init__(self, base_url): self.base_url=base_url.rstrip("/")
+    def health(self): return requests.get(self.base_url+"/health").json()
+    def create_task(self, task): return requests.post(self.base_url+"/operator/task", json={"task":task}).json()
+    def agents(self): return requests.get(self.base_url+"/operator/agents").json()
+    def revenue(self): return requests.get(self.base_url+"/operator/revenue").json()
+PY
+
+cat > sdk/python/agentflow_relay/__init__.py <<'PY'
+from .client import AgentFlowClient
+PY
+
+cat > docs/BUYOUT_AND_REVENUE_POSITIONING.md <<'MD'
+# AgentFlow Relay — Revenue and Buyout Positioning
+
+AgentFlow Relay is positioned as AI workforce infrastructure.
+
+## What it sells
+- SDK licensing
+- Hosted agent relay subscriptions
+- White-label AI operator portals
+- API usage billing
+- Workflow template marketplace
+
+## Why AI companies may care
+- Agent interoperability
+- Messaging-native access
+- BYOA onboarding
+- Capability discovery
+- Task routing
+- Workflow monetization
+- Enterprise operator layer
+
+## Product wedge
+Start with high-value workflows:
+1. Job search + resume + outreach
+2. Lead generation
+3. E-commerce intelligence
+4. Support escalation
+5. Research automation
+MD
+
+git add .
+git commit -m "Final premium product operator revenue SDK upgrade" || true
+git push origin main
+
+render services deploy srv-d8511brbc2fs73etqt8g --confirm || true
+
+echo ""
+echo "FINAL URLS:"
+echo "https://agentflow-relay.onrender.com/ui"
+echo "https://agentflow-relay.onrender.com/docs"
+echo "https://agentflow-relay.onrender.com/operator/revenue"
+echo "https://agentflow-relay.onrender.com/operator/sdk"
+echo "https://agentflow-relay.onrender.com/operator/templates"
