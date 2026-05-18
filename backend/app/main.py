@@ -865,7 +865,28 @@ metrics()
 def ui():
     return HTML
 
+
+@app.head("/")
+def root_head():
+    return {}
+
+@app.get("/demo/enterprise")
+def enterprise_demo():
+    return {
+        "platform":"AgentFlow Relay Platinum",
+        "focus":[
+            "workflow orchestration",
+            "AI workforce management",
+            "SDK monetization",
+            "enterprise observability",
+            "Telegram operations",
+            "Stripe monetization"
+        ],
+        "status":"demo-ready"
+    }
+
 @app.get("/health")
+
 def health():
     return {"ok":True,"service":"agentflow-relay","version":"11.0.0"}
 
@@ -1131,7 +1152,13 @@ async def telegram_update(request:Request):
     chat_id=msg.get("chat",{}).get("id")
     text=msg.get("text","")
 
+    
     reply="AgentFlow Relay active."
+
+    if text.startswith("/start"):
+        reply="AgentFlow Relay Platinum online. Commands: /metrics /diagnostics /revenue /task"
+
+
 
     if text.startswith("/metrics"):
         reply=json.dumps(metrics())
@@ -1155,3 +1182,10 @@ async def telegram_update(request:Request):
             )
 
     return {"ok":True}
+
+
+audit("platform_boot",{
+    "version":"11.1.0",
+    "runtime":"render"
+})
+
