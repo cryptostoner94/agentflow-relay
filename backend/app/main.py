@@ -3,6 +3,7 @@ from uuid import uuid4
 from datetime import datetime
 from cryptography.fernet import Fernet
 from fastapi import FastAPI, Request
+from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 
