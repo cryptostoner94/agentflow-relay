@@ -218,3 +218,6 @@ async def telegram_webhook():
 @app.post("/platform/telegram/update")
 async def telegram_update(request:Request):
     update=await request.json(); audit("telegram_update",update); return {"ok":True}
+
+
+app.mount("/static", StaticFiles(directory="backend/app/static"), name="static")
