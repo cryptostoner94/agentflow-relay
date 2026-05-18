@@ -1,36 +1,31 @@
-from fastapi import FastAPI
-from fastapi.responses import HTMLResponse
-from pydantic import BaseModel
+import os, json, sqlite3, base64, hashlib, httpx
 from uuid import uuid4
 from datetime import datetime
 from cryptography.fernet import Fernet
-import os, json, sqlite3, base64, hashlib, httpx
+from fastapi import FastAPI, Request
+from fastapi.responses import HTMLResponse
+from pydantic import BaseModel
 
 DB="backend/app/data/agentflow.sqlite3"
 os.makedirs("backend/app/data", exist_ok=True)
 
-def key():
-    seed=os.getenv("AGENTFLOW_MASTER_SECRET","agentflow-local-secret")
-    return base64.urlsafe_b64encode(hashlib.sha256(seed.encode()).digest())
-
-fernet=Fernet(key())
-
-def db():
-    con=sqlite3.connect(DB)
-    con.row_factory=sqlite3.Row
-    con.execute("create table if not exists secrets(name text primary key,value text,masked text,updated_at text)")
-    con.execute("create table if not exists users(id text primary key,name text,email text,api_key text,created_at text)")
-    con.execute("create table if not exists agents(id text primary key,name text,endpoint text,capabilities text,created_at text)")
-    con.execute("create table if not exists workflows(id text primary key,name text,description text,price real,created_at text)")
-    con.execute("create table if not exists tasks(id text primary key,prompt text,status text,created_at text)")
-    con.execute("create table if not exists audit(id text primary key,event text,data text,created_at text)")
-    con.commit()
-    return con
-
 def now(): return datetime.utcnow().isoformat()
-def mask(v): return v[:6]+"..."+v[-4:] if v and len(v)>12 else "***"
+def key():
+    return base64.urlsafe_b64encode(hashlib.sha256(os.getenv("AGENTFLOW_MASTER_SECRET","agentflow-secret").encode()).digest())
+fernet=Fernet(key())
 def enc(v): return fernet.encrypt(v.encode()).decode()
 def dec(v): return fernet.decrypt(v.encode()).decode()
+def mask(v): return v[:6]+"..."+v[-4:] if v and len(v)>12 else "***"
+
+def db():
+    con=sqlite3.connect(DB); con.row_factory=sqlite3.Row
+    con.execute("create table if not exists secrets(name text primary key,value text,masked text,updated_at text)")
+    con.execute("create table if not exists users(id text primary key,name text,email text,api_key text,created_at text)")
+    con.execute("create table if not exists agents(id text primary key,name text,endpoint text,capabilities text,status text,created_at text)")
+    con.execute("create table if not exists workflows(id text primary key,name text,description text,price real,status text,created_at text)")
+    con.execute("create table if not exists tasks(id text primary key,prompt text,status text,result text,created_at text)")
+    con.execute("create table if not exists audit(id text primary key,event text,data text,created_at text)")
+    con.commit(); return con
 
 def audit(event,data=None):
     con=db()
@@ -38,13 +33,10 @@ def audit(event,data=None):
     con.commit(); con.close()
 
 def get_secret(name):
-    con=db()
-    row=con.execute("select value from secrets where name=?",(name,)).fetchone()
-    con.close()
-    if not row: return None
-    return dec(row["value"])
+    con=db(); row=con.execute("select value from secrets where name=?",(name,)).fetchone(); con.close()
+    return dec(row["value"]) if row else None
 
-app=FastAPI(title="AgentFlow Relay Platinum",version="7.0.0")
+app=FastAPI(title="AgentFlow Relay Platinum",version="8.0.0")
 
 class SecretIn(BaseModel): name:str; value:str
 class UserIn(BaseModel): name:str; email:str
@@ -53,27 +45,26 @@ class WorkflowIn(BaseModel): name:str; description:str=""; price:float=0
 class TaskIn(BaseModel): prompt:str
 class CheckoutIn(BaseModel): name:str="AgentFlow Workflow"; amount_cents:int=2900; currency:str="cad"
 
-HTML = """
+HTML="""
 <!doctype html><html><head><meta name='viewport' content='width=device-width,initial-scale=1'/>
 <title>AgentFlow Relay Platinum</title>
 <style>
 body{margin:0;background:#020617;color:white;font-family:Arial}
-.hero{padding:42px;background:linear-gradient(135deg,#10b981,#0891b2,#020617)}
-h1{font-size:48px;margin:0}.sub{font-size:18px;margin-top:12px;color:#d1fae5}
+.hero{padding:42px;background:linear-gradient(135deg,#10b981,#0891b2,#020617)}h1{font-size:46px;margin:0}.sub{font-size:18px;color:#d1fae5}
 .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(290px,1fr));gap:18px;padding:24px}
 .card{background:#0f172a;border:1px solid #2dd4bf;border-radius:22px;padding:20px;box-shadow:0 0 30px rgba(45,212,191,.15)}
 h2{color:#5eead4}button{background:#5eead4;color:#022c22;border:0;border-radius:12px;padding:12px 16px;font-weight:bold;margin:6px;cursor:pointer}
 input,textarea,select{width:100%;background:#020617;color:#d1fae5;border:1px solid #155e75;border-radius:12px;padding:12px;margin:6px 0}
-pre{background:#020617;color:#86efac;border:1px solid #164e63;border-radius:14px;padding:14px;min-height:180px;white-space:pre-wrap;overflow:auto}
+pre{background:#020617;color:#86efac;border:1px solid #164e63;border-radius:14px;padding:14px;min-height:170px;white-space:pre-wrap;overflow:auto}
 </style></head><body>
-<div class='hero'><h1>AgentFlow Relay Platinum</h1><div class='sub'>Secure key vault + Stripe + Supabase + Telegram + workflows + agents + SDK + audit logs.</div></div>
+<div class='hero'><h1>AgentFlow Relay Platinum</h1><div class='sub'>Secure key vault, Stripe checkout, Telegram webhook, Supabase check, workflows, agents, SDK, audit logs.</div></div>
 <div class='grid'>
 <div class='card'><h2>Secure Key Vault</h2><select id='sname'><option>STRIPE_SECRET_KEY</option><option>SUPABASE_URL</option><option>SUPABASE_SERVICE_ROLE_KEY</option><option>TELEGRAM_BOT_TOKEN</option><option>OPENAI_API_KEY</option><option>GROQ_API_KEY</option><option>GEMINI_API_KEY</option></select><input id='svalue' placeholder='Paste key once'><button onclick='secret()'>Save Key</button><button onclick='secrets()'>Status</button><pre id='secretout'></pre></div>
-<div class='card'><h2>Stripe Checkout</h2><input id='product' value='AgentFlow Workflow Automation'><input id='amount' value='2900'><button onclick='checkout()'>Create Checkout Link</button><pre id='stripeout'></pre></div>
+<div class='card'><h2>Stripe</h2><input id='product' value='AgentFlow Workflow Automation'><input id='amount' value='2900'><button onclick='checkout()'>Create Checkout Link</button><pre id='stripeout'></pre></div>
 <div class='card'><h2>Telegram</h2><button onclick='tgtest()'>Test Bot</button><button onclick='tgwebhook()'>Set Webhook</button><pre id='tgout'></pre></div>
 <div class='card'><h2>Supabase</h2><button onclick='supabase()'>Check Connection</button><pre id='dbout'></pre></div>
 <div class='card'><h2>User</h2><input id='name' placeholder='Name'><input id='email' placeholder='Email'><button onclick='user()'>Create User</button><pre id='userout'></pre></div>
-<div class='card'><h2>Agent</h2><input id='aname' placeholder='Agent name'><input id='endpoint' placeholder='Endpoint'><input id='caps' placeholder='capabilities comma-separated'><button onclick='agent()'>Register Agent</button><pre id='agentout'></pre></div>
+<div class='card'><h2>Agent</h2><input id='aname' placeholder='Agent name'><input id='endpoint' placeholder='Endpoint'><button onclick='agent()'>Register Agent</button><pre id='agentout'></pre></div>
 <div class='card'><h2>Workflow</h2><input id='wname' placeholder='Workflow name'><textarea id='wdesc' placeholder='Description'></textarea><input id='price' value='29'><button onclick='workflow()'>Create Workflow</button><pre id='workflowout'></pre></div>
 <div class='card'><h2>Task</h2><textarea id='prompt'>Find 5 remote jobs, adapt resume angle, draft outreach email.</textarea><button onclick='task()'>Run Task</button><pre id='taskout'></pre></div>
 <div class='card'><h2>Metrics</h2><button onclick='metrics()'>Refresh</button><pre id='metrics'></pre></div>
@@ -90,7 +81,7 @@ async function tgtest(){show('tgout',await api('/platform/telegram/test'))}
 async function tgwebhook(){show('tgout',await api('/platform/telegram/webhook',{method:'POST'}))}
 async function supabase(){show('dbout',await api('/platform/supabase/check'))}
 async function user(){show('userout',await api('/platform/users',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:name.value||'Creator',email:email.value||'creator@example.com'})}))}
-async function agent(){show('agentout',await api('/platform/agents',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:aname.value||'Agent',endpoint:endpoint.value,capabilities:caps.value.split(',').map(x=>x.trim()).filter(Boolean)})}))}
+async function agent(){show('agentout',await api('/platform/agents',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:aname.value||'Agent',endpoint:endpoint.value})}))}
 async function workflow(){show('workflowout',await api('/platform/workflows',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:wname.value||'Workflow',description:wdesc.value||'Automation workflow',price:Number(price.value||29)})}))}
 async function task(){show('taskout',await api('/platform/tasks',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({prompt:prompt.value})}))}
 async function metrics(){show('metrics',await api('/platform/metrics'))}
@@ -105,8 +96,11 @@ metrics();secrets()
 @app.get("/ui", response_class=HTMLResponse)
 def ui(): return HTML
 
+@app.head("/")
+def head_root(): return {}
+
 @app.get("/health")
-def health(): return {"ok":True,"service":"agentflow-relay","version":"7.0.0"}
+def health(): return {"ok":True,"service":"agentflow-relay","version":"8.0.0"}
 
 @app.post("/platform/secrets")
 def save_secret(s:SecretIn):
@@ -121,12 +115,10 @@ def secrets():
 
 @app.get("/platform/metrics")
 def metrics():
-    con=db()
-    out={}
+    con=db(); out={}
     for t in ["users","agents","workflows","tasks","audit","secrets"]:
         out[t]=con.execute(f"select count(*) n from {t}").fetchone()["n"]
-    con.close()
-    out["runtime"]="live"; out["fake_metrics"]=False
+    con.close(); out["runtime"]="live"; out["fake_metrics"]=False
     return out
 
 @app.post("/platform/users")
@@ -153,7 +145,7 @@ def workflows(w:WorkflowIn):
 @app.post("/platform/tasks")
 def tasks(t:TaskIn):
     tid="tsk_"+uuid4().hex[:12]
-    con=db(); con.execute("insert into tasks values(?,?,?,?)",(tid,t.prompt,"accepted",now())); con.commit(); con.close()
+    con=db(); con.execute("insert into tasks values(?,?,?,?,?)",(tid,t.prompt,"accepted","Task accepted into execution ledger.",now())); con.commit(); con.close()
     audit("task_created",{"id":tid})
     return {"id":tid,"status":"accepted","execution_path":["intake","route","execute","audit"],"prompt":t.prompt}
 
@@ -168,7 +160,7 @@ def revenue():
 
 @app.get("/platform/sdk")
 def sdk():
-    return {"python":"from agentflow_relay import AgentFlowClient\\nclient=AgentFlowClient('https://agentflow-relay.onrender.com')\\nclient.create_task('run workflow')","curl":"curl -X POST https://agentflow-relay.onrender.com/platform/tasks -H 'Content-Type: application/json' -d '{\"prompt\":\"run workflow\"}'"}
+    return {"python":"from agentflow_relay import AgentFlowClient\\nclient=AgentFlowClient('https://agentflow-relay.onrender.com')\\nclient.create_task('run workflow')","curl":"curl -X POST https://agentflow-relay.onrender.com/platform/tasks -H 'Content-Type: application/json' -d '{\\"prompt\\":\\"run workflow\\"}'"}
 
 @app.get("/platform/supabase/check")
 async def supabase_check():
