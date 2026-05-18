@@ -158,9 +158,29 @@ def audit_view():
 def revenue():
     return {"revenue_streams":["Stripe workflow checkout","monthly automation retainer","SDK/API licensing","white-label deployments","Telegram operator access"],"first_money_path":["Save Stripe key","Create workflow","Create checkout link","Sell one customer","Run task","Use audit as proof"]}
 
+
 @app.get("/platform/sdk")
 def sdk():
-    return {"python":"from agentflow_relay import AgentFlowClient\\nclient=AgentFlowClient('https://agentflow-relay.onrender.com')\\nclient.create_task('run workflow')","curl":"curl -X POST https://agentflow-relay.onrender.com/platform/tasks -H 'Content-Type: application/json' -d '{\\"prompt\\":\\"run workflow\\"}'"}
+    return {
+        "python": "from agentflow_relay import AgentFlowClient\nclient = AgentFlowClient('https://agentflow-relay.onrender.com')\nclient.create_task('run workflow')",
+        "curl": "curl -X POST https://agentflow-relay.onrender.com/platform/tasks -H 'Content-Type: application/json' -d '{\"prompt\":\"run workflow\"}'",
+        "base_url": "https://agentflow-relay.onrender.com",
+        "endpoints": [
+            "/health",
+            "/ui",
+            "/platform/secrets",
+            "/platform/stripe/checkout",
+            "/platform/telegram/test",
+            "/platform/telegram/webhook",
+            "/platform/supabase/check",
+            "/platform/users",
+            "/platform/agents",
+            "/platform/workflows",
+            "/platform/tasks",
+            "/platform/metrics",
+            "/platform/audit"
+        ]
+    }
 
 @app.get("/platform/supabase/check")
 async def supabase_check():
