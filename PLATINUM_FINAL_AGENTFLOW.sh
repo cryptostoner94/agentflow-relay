@@ -1,3 +1,24 @@
+#!/bin/bash
+set -e
+
+echo "PATCHING AGENTFLOW RELAY PLATINUM..."
+
+mkdir -p backend/app/routers backend/app/services backend/app/data sdk/python/agentflow_relay docs
+
+cat > backend/requirements.txt <<'REQ'
+fastapi==0.115.6
+uvicorn==0.34.0
+pydantic==2.10.4
+python-dotenv==1.0.1
+requests==2.32.3
+httpx==0.28.1
+jinja2==3.1.5
+python-multipart==0.0.20
+websockets==14.1
+cryptography==44.0.0
+REQ
+
+cat > backend/app/main.py <<'PY'
 from fastapi import FastAPI
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
@@ -206,3 +227,27 @@ async def telegram_webhook():
 @app.post("/platform/telegram/update")
 async def telegram_update(request:Request):
     update=await request.json(); audit("telegram_update",update); return {"ok":True}
+PY
+
+cat > sdk/python/agentflow_relay/client.py <<'PY'
+import requests
+class AgentFlowClient:
+    def __init__(self, base_url): self.base_url=base_url.rstrip("/")
+    def health(self): return requests.get(self.base_url+"/health").json()
+    def create_task(self,prompt): return requests.post(self.base_url+"/platform/tasks",json={"prompt":prompt}).json()
+PY
+
+cat > sdk/python/agentflow_relay/__init__.py <<'PY'
+from .client import AgentFlowClient
+PY
+
+python -m py_compile backend/app/main.py
+
+git add .
+git commit -m "Platinum final single-file recovery deployment" || true
+git push origin main
+
+render services deploy srv-d8511brbc2fs73etqt8g --confirm
+
+echo "OPEN:"
+echo "https://agentflow-relay.onrender.com/ui?platinum=7"
