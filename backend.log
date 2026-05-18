@@ -1,0 +1,17 @@
+INFO:     Started server process [10570]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://0.0.0.0:8000 (Press CTRL+C to quit)
+INFO:     2a02:26f7:bacc:620a:0:8000:0:e:0 - "GET / HTTP/1.1" 200 OK
+INFO:     2a02:26f7:bacc:620a:0:8000:0:e:0 - "GET /favicon.ico HTTP/1.1" 404 Not Found
+INFO:     2a02:26f7:bacc:620a:0:8000:0:e:0 - "GET /ui HTTP/1.1" 200 OK
+INFO:     2a02:26f7:bacc:620a:0:8000:0:e:0 - "GET /logs HTTP/1.1" 200 OK
+INFO:     2a02:26f7:bacc:620a:0:8000:0:e:0 - "GET /docs HTTP/1.1" 200 OK
+INFO:     2a02:26f7:bacc:620a:0:8000:0:e:0 - "GET /openapi.json HTTP/1.1" 200 OK
+INFO:     2a02:26f7:bacc:620a:0:8000:0:e:0 - "GET /agents HTTP/1.1" 200 OK
+INFO:     2a02:26f7:bacc:620a:0:8000:0:e:0 - "GET /agents HTTP/1.1" 200 OK
+INFO:     2a02:26f7:bacc:620a:0:8000:0:e:0 - "POST /tasks HTTP/1.1" 422 Unprocessable Content
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [10570]
