@@ -2,10 +2,17 @@
 import os, json, sqlite3, base64, hashlib, httpx
 from uuid import uuid4
 from datetime import datetime
-from cryptography.fernet import Fernet
+from cryptography.fernet import Fernet, InvalidToken
 from fastapi import FastAPI, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 from pydantic import BaseModel
+from app.auth import (
+    MASTER_SECRET_ENV,
+    OperatorAuthMiddleware,
+    VaultKeyUnavailable,
+    master_secret,
+    telegram_webhook_secret,
+)
 
 DB = "backend/app/data/agentflow.sqlite3"
 os.makedirs("backend/app/data", exist_ok=True)
@@ -24,16 +31,24 @@ VALID_KEYS = [
 def now():
     return datetime.utcnow().isoformat()
 
-def fkey():
-    return base64.urlsafe_b64encode(hashlib.sha256(os.getenv("AGENTFLOW_MASTER_SECRET", "agentflow-stable-secret").encode()).digest())
+_fernets = {}
 
-fernet = Fernet(fkey())
+def fkey():
+    secret = master_secret()
+    if secret is None:
+        raise VaultKeyUnavailable(
+            f"{MASTER_SECRET_ENV} must hold at least 16 characters; the vault stays disabled until it does"
+        )
+    key = base64.urlsafe_b64encode(hashlib.sha256(secret.encode()).digest())
+    if key not in _fernets:
+        _fernets[key] = Fernet(key)
+    return _fernets[key]
 
 def enc(v):
-    return fernet.encrypt(v.encode()).decode()
+    return fkey().encrypt(v.encode()).decode()
 
 def dec(v):
-    return fernet.decrypt(v.encode()).decode()
+    return fkey().decrypt(v.encode()).decode()
 
 def mask(v):
     if not v:
@@ -77,6 +92,28 @@ def save_secret(name, value):
     audit("secret_saved", {"name": name, "masked": mask(value)})
     return True
 
+_reported_undecryptable = set()
+
+def report_undecryptable(name):
+    """Record a stored row that the current master secret cannot decrypt."""
+    if name in _reported_undecryptable:
+        return
+    _reported_undecryptable.add(name)
+    audit("secret_undecryptable", {"name": name, "reason": "stored under a different master secret; enter the value again"}, level="error")
+
+def vault_unreadable():
+    """Names whose stored value the current master secret cannot decrypt."""
+    c = db()
+    rows = c.execute("select name,value from secrets").fetchall()
+    c.close()
+    unreadable = []
+    for r in rows:
+        try:
+            dec(r["value"])
+        except Exception:
+            unreadable.append(r["name"])
+    return unreadable
+
 def vault_secret(name):
     c = db()
     r = c.execute("select value from secrets where name=?", (name,)).fetchone()
@@ -85,9 +122,12 @@ def vault_secret(name):
         return None
     try:
         v = dec(r["value"])
-        return v if good(v) else None
-    except Exception:
+    except VaultKeyUnavailable:
         return None
+    except InvalidToken:
+        report_undecryptable(name)
+        return None
+    return v if good(v) else None
 
 def get_secret(name):
     v = vault_secret(name)
@@ -99,6 +139,7 @@ def get_secret(name):
     return None
 
 app = FastAPI(title="AgentFlow Relay Platinum", version="14.0.0")
+app.add_middleware(OperatorAuthMiddleware)
 
 class SecretIn(BaseModel):
     name: str
@@ -152,7 +193,7 @@ textarea.big{min-height:260px}pre{background:#020617;border:1px solid #1d4ed8;bo
 .creator{display:none}.creator.on{display:block}.badge{display:inline-block;border:1px solid var(--b);border-radius:999px;padding:7px 10px;margin:4px;color:var(--a);font-size:12px}
 .outputTitle{color:var(--a);font-weight:900;margin-top:14px}
 </style></head><body>
-<div class="hero"><div class="top"><div><h1>AgentFlow Relay Platinum</h1><div class="sub">AI workforce OS with real response output, workflow creation, task execution, Stripe revenue, Telegram mini app, SDK licensing, logs, diagnostics, and enterprise buyer demo.</div><span class="badge">Real Output</span><span class="badge">Blue Enterprise UI</span><span class="badge">Creator Controls</span><span class="badge">Provider Routing</span></div><div><button onclick="theme('light')">Light</button><button onclick="theme('dark')">Dark</button><button onclick="creator()">Creator</button></div></div>
+<div class="hero"><div class="top"><div><h1>AgentFlow Relay Platinum</h1><div class="sub">AI workforce OS with real response output, workflow creation, task execution, Stripe revenue, Telegram mini app, SDK licensing, logs, diagnostics, and enterprise buyer demo.</div><span class="badge">Real Output</span><span class="badge">Blue Enterprise UI</span><span class="badge">Creator Controls</span><span class="badge">Provider Routing</span></div><div><button onclick="theme('light')">Light</button><button onclick="theme('dark')">Dark</button><button onclick="setToken()">Operator Token</button><button onclick="creator()">Creator</button></div></div>
 <div class="kpis"><div class="kpi"><div class="kt">Runtime</div><div class="kv">LIVE</div></div><div class="kpi"><div class="kt">Revenue</div><div class="kv" id="revk">0</div></div><div class="kpi"><div class="kt">Agents</div><div class="kv" id="agk">0</div></div><div class="kpi"><div class="kt">Tasks</div><div class="kv" id="tsk">0</div></div></div></div>
 <div class="tabs"><div class="tab active" onclick="pg('operator',this)">Agent Operator</div><div class="tab" onclick="pg('settings',this)">Settings</div><div class="tab" onclick="pg('studio',this)">Workflow Studio</div><div class="tab" onclick="pg('revenue',this)">Revenue</div><div class="tab" onclick="pg('telegram',this)">Telegram</div><div class="tab creator" onclick="pg('creatorpage',this)">Creator Metrics</div><div class="tab" onclick="pg('logs',this)">Logs</div><div class="tab" onclick="pg('enterprise',this)">Enterprise Pitch</div></div>
 
@@ -202,7 +243,9 @@ function theme(m){document.body.classList.toggle('light',m==='light');localStora
 if(localStorage.getItem('theme')==='light')document.body.classList.add('light')
 function creator(){document.querySelectorAll('.creator').forEach(x=>x.classList.toggle('on'))}
 function pg(id,el){document.querySelectorAll('.page').forEach(x=>x.classList.remove('active'));document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active'));document.getElementById(id).classList.add('active');el.classList.add('active')}
-async function api(p,m='GET',b=null){let r=await fetch(p,{method:m,headers:{'Content-Type':'application/json'},body:b?JSON.stringify(b):null});return await r.json()}
+function opToken(){return localStorage.getItem('operatorToken')||''}
+function setToken(){let t=prompt('Operator token');if(t){localStorage.setItem('operatorToken',t.trim());metrics()}}
+async function api(p,m='GET',b=null){let h={'Content-Type':'application/json'};let t=opToken();if(t)h['X-Operator-Token']=t;let r=await fetch(p,{method:m,headers:h,body:b?JSON.stringify(b):null});if(r.status===401&&!t){let n=prompt('Operator token required');if(n){localStorage.setItem('operatorToken',n.trim());return api(p,m,b)}}return await r.json()}
 function show(id,d){document.getElementById(id).textContent=typeof d==='string'?d:JSON.stringify(d,null,2)}
 async function metrics(){let r=await api('/platform/metrics');let el=document.getElementById('metrics_out'); if(el) show('metrics_out',r);agk.innerText=r.agents;tsk.innerText=r.tasks;revk.innerText=r.revenue}
 async function saveKey(){show('secret_out',await api('/platform/secrets','POST',{name:sname.value,value:svalue.value}));svalue.value='';metrics()}
@@ -242,7 +285,13 @@ def post_secret(s: SecretIn):
         return {"ok": False, "error": "unsupported key for this project"}
     if not good(s.value):
         return {"ok": False, "error": "empty or placeholder value rejected"}
-    save_secret(s.name, s.value)
+    try:
+        save_secret(s.name, s.value)
+    except VaultKeyUnavailable:
+        return JSONResponse(
+            status_code=503,
+            content={"ok": False, "error": f"{MASTER_SECRET_ENV} is not configured; the vault refuses to store secrets under a default key"},
+        )
     return {"ok": True, "name": s.name, "masked": mask(s.value), "full_value_returned": False}
 
 @app.get("/platform/secrets")
@@ -250,11 +299,14 @@ def list_secrets():
     c = db()
     rows = [dict(x) for x in c.execute("select name,masked,updated_at from secrets order by name").fetchall()]
     c.close()
+    unreadable = set(vault_unreadable())
+    for r in rows:
+        r["readable"] = r["name"] not in unreadable
     present = {r["name"] for r in rows}
     for n in VALID_KEYS:
         v = os.getenv(n)
         if good(v) and n not in present:
-            rows.append({"name": n, "masked": mask(v), "updated_at": "render_env_fallback"})
+            rows.append({"name": n, "masked": mask(v), "updated_at": "render_env_fallback", "readable": True})
     return {"secrets": rows, "full_values_returned": False}
 
 @app.get("/platform/metrics")
@@ -398,7 +450,9 @@ def logs(level: str = "info"):
 
 @app.get("/platform/diagnostics")
 def diagnostics():
-    d = {"stripe": bool(get_secret("STRIPE_SECRET_KEY")), "telegram": bool(get_secret("TELEGRAM_BOT_TOKEN")), "supabase_url": bool(get_secret("SUPABASE_URL")), "supabase_service_key": bool(get_secret("SUPABASE_SERVICE_ROLE_KEY")), "openai": bool(get_secret("OPENAI_API_KEY")), "openrouter": bool(get_secret("OPENROUTER_API_KEY")), "groq": bool(get_secret("GROQ_API_KEY")), "gemini": bool(get_secret("GEMINI_API_KEY")), "runtime": "healthy"}
+    d = {"stripe": bool(get_secret("STRIPE_SECRET_KEY")), "telegram": bool(get_secret("TELEGRAM_BOT_TOKEN")), "supabase_url": bool(get_secret("SUPABASE_URL")), "supabase_service_key": bool(get_secret("SUPABASE_SERVICE_ROLE_KEY")), "openai": bool(get_secret("OPENAI_API_KEY")), "openrouter": bool(get_secret("OPENROUTER_API_KEY")), "groq": bool(get_secret("GROQ_API_KEY")), "gemini": bool(get_secret("GEMINI_API_KEY")), "vault_key": master_secret() is not None, "vault_unreadable": vault_unreadable(), "runtime": "healthy"}
+    for name in d["vault_unreadable"]:
+        report_undecryptable(name)
     audit("diagnostics_run", d)
     return d
 
@@ -461,8 +515,11 @@ async def telegram_webhook():
     token = get_secret("TELEGRAM_BOT_TOKEN")
     if not token:
         return {"ok": False, "message": "Telegram token missing"}
+    secret = telegram_webhook_secret()
+    if not secret:
+        return {"ok": False, "message": f"{MASTER_SECRET_ENV} is not configured; the webhook would refuse every update"}
     async with httpx.AsyncClient(timeout=20) as client:
-        r = await client.post(f"https://api.telegram.org/bot{token}/setWebhook", json={"url": "https://agentflow-relay.onrender.com/platform/telegram/update"})
+        r = await client.post(f"https://api.telegram.org/bot{token}/setWebhook", json={"url": "https://agentflow-relay.onrender.com/platform/telegram/update", "secret_token": secret})
     audit("telegram_webhook", {"status": r.status_code})
     return r.json()
 
